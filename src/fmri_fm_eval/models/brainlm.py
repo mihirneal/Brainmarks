@@ -79,6 +79,7 @@ class BrainLMTransform:
         target_tr: float = DEFAULT_TR,
         max_val_to_scale: float = DEFAULT_MAX_VAL_TO_SCALE,
         repeat_channels: bool = True,
+        zscore_normalization: str | None = None,
     ):
         """
         Args:
@@ -87,11 +88,16 @@ class BrainLMTransform:
             max_val_to_scale: Max value for scaling - DATASET-SPECIFIC!
                               Default 5.6430855 is for RobustScaler normalized data.
                               Will be different for z-score normalized data.
+            zscore_normalization: Normalization mode. None uses the default RobustScaler
+                                  + max-val scaling. "time" applies per-voxel z-score
+                                  across time. "time_space" applies per-voxel z-score
+                                  across time, then per-timepoint z-score across space.
         """
         self.num_timepoints = num_timepoints
         self.target_tr = target_tr
         self.max_val_to_scale = max_val_to_scale
         self.repeat_channels = repeat_channels
+        self.zscore_normalization = zscore_normalization
 
         # Load voxel reordering indices from coords dataset
         coords_ds = load_a424_coords()  # (424, 4), cols [Index, X, Y, Z]
@@ -115,14 +121,31 @@ class BrainLMTransform:
         # Convert z-scored data back to raw signal
         bold = bold * std + mean
 
-        # Per-ROI robust scaling with stats computed over entire dataset
-        # Following BrainLM "Voxelwise_RobustScaler_Normalized_Recording"
-        assert self.global_stats_ is not None, "global_stats_ is None; call fit()"
-        median, iqr = self.global_stats_
-        bold = (bold - median) / (iqr + 1e-6)
+        if self.zscore_normalization == "time":
+            # Per-voxel z-score: normalize each voxel's time series independently
+            mean = bold.mean(dim=0, keepdim=True)   # [1, D]
+            std = bold.std(dim=0, keepdim=True)     # [1, D]
+            bold = (bold - mean) / (std + 1e-6)
 
-        # Scale by max value
-        bold = bold / self.max_val_to_scale
+        elif self.zscore_normalization == "time_space":
+            # Sequential z-score: first across time (per-voxel), then across space (per-timepoint)
+            # Step 1: normalize across time (axis=0) — per-voxel
+            mean = bold.mean(dim=0, keepdim=True)   # [1, D]
+            std = bold.std(dim=0, keepdim=True)     # [1, D]
+            bold = (bold - mean) / (std + 1e-6)
+            # Step 2: normalize across space (axis=1) — per-timepoint
+            mean = bold.mean(dim=1, keepdim=True)   # [T, 1]
+            std = bold.std(dim=1, keepdim=True)     # [T, 1]
+            bold = (bold - mean) / (std + 1e-6)
+
+        else:
+            # Default: RobustScaler + max val scaling
+            # Per-ROI robust scaling with stats computed over entire dataset
+            # Following BrainLM "Voxelwise_RobustScaler_Normalized_Recording"
+            assert self.global_stats_ is not None, "global_stats_ is None; call fit()"
+            median, iqr = self.global_stats_
+            bold = (bold - median) / (iqr + 1e-6)
+            bold = bold / self.max_val_to_scale
 
         if abs(tr - self.target_tr) >= 0.1:
             bold = resample_to_target_tr(bold, tr, self.target_tr)
