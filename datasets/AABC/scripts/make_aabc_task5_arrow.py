@@ -9,18 +9,6 @@ taxonomy for AABC task fMRI:
 - recall
 - vismotor
 
-This builder is intentionally closer to `hcpya-task21` than to the earlier
-subject-unique AABC task dataset:
-
-- V1 only
-- subject-disjoint train/validation/test splits defined by subject batches
-- multiple clips per subject are allowed within a split
-- one clip per CARIT event
-- multiple clips per long FACENAME / VISMOTOR block
-
-The default split counts are the closest 5-way balanced match to the saved
-row counts of `hcpya-task21.flat.arrow`:
-
 - train: 19,000 total = 3,800 per class
 - validation: 4,030 total = 806 per class
 - test: 5,040 total = 1,008 per class
